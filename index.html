@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script
+        src="https://code.jquery.com/jquery-3.6.4.js"
+        integrity="sha256-a9jBBRygX1Bh5lt8GZjXDzyOB+bWve9EiO7tROUtj/E="
+        crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.min.js" integrity="sha384-cuYeSxntonz0PPNlHhBs68uyIAVpIIOZZ5JqeqvYYIcEL727kskC66kF92t6Xl2V" crossorigin="anonymous"></script>
+    <style>
+        .skateLED {
+            outline: solid;
+            outline-color: black;
+            outline-width: 2px;
+            /*width: 42.8571429px;*/
+            height: 31.1111111px;
+        }
+        #LEDArray {
+            position: absolute;
+            top: 31.1111111px;
+            left: 20px;
+            width: 1750px;
+            height: 554px;
+        }
+        .LEDMissing {
+            outline: none !important;
+        }
+        .control-position {
+            position: absolute;
+            top: 650px;
+        }
+    </style>
+    <script>
+        // This is an array of Objects.
+        // Each frame object has structure:
+        //      {
+        //          "frameDuration": time to run the frame for,
+        //          "values": Object of key value pairs -> "index": "hex color",
+        //      }
+        let frames = [];
+        let current_color = "#ff0000";
+
+        function activateLED(targetLED) {
+            document.getElementById(targetLED).style="background-color: " + current_color;
+            document.getElementById(targetLED).value = current_color;
+        }
+
+        function activateLEDWithColor(targetLED, color) {
+            document.getElementById(targetLED).style = "background-color: " + color;
+            document.getElementById(targetLED).value = color;
+        }
+
+        function clearBoard() {
+            for(let i = 1; i <= 657; i++) {
+                document.getElementById("LED" + i).style = "background-color: none";
+            }
+        }
+
+        function newLEDColor() {
+            current_color = document.getElementById("LEDColor").value;
+        }
+
+        function saveFrame() {
+            let LEDValues = {};
+            for(let i=1; i<=657; i++) {
+                let targetLED = "LED" + i;
+                let LEDValue = document.getElementById(targetLED).value;
+                if(LEDValue != undefined && LEDValue != null) {
+                    LEDValues[i] = LEDValue;
+                }
+            }
+            let frameDuration = document.getElementById("frameDuration").value;
+            frames.push({"frameDuration": frameDuration, "values": LEDValues});
+        }
+
+        function getFrames() {
+            console.log(JSON.stringify(frames));
+        }
+
+        function hexToInt_2digit(hex) {
+            return parseInt("0x" + hex);
+        }
+
+        function hexToCRGBString(hexString) {
+            let rHexString = hexString.slice(1,3);
+            let gHexString = hexString.slice(3,5);
+            let bHexString = hexString.slice(5,7);
+
+            let r = hexToInt_2digit(rHexString);
+            let g = hexToInt_2digit(gHexString);
+            let b = hexToInt_2digit(bHexString);
+
+            return "" + r + "," + g + "," + b
+        }
+
+        function animationPlayback() {
+            for(let i = 0; i < frames.length; i++) {
+                let frameDuration = parseInt(frames[i]["frameDuration"]);
+                let frameValues = frames[i].values;
+                let frameValuesKeys = Object.keys(frameValues);
+                for(let j = 0; j < frameValuesKeys.length; j++) {
+                    let currentKey = frameValuesKeys[j];
+                    document.getElementById("LED" + currentKey).style = "background-color: " + frameValues[currentKey];
+                    document.getElementById("LED" + currentKey).value = frameValues[currentKey];
+                }
+                let currentTime = Date.now();
+                let targetTime = currentTime + frameDuration;
+                while(currentTime < targetTime) {
+                    currentTime = Date.now();
+                }
+            }
+        }
+
+        // any consecutive delay lines can be combined.
+        function combineDelays(codeString) {
+            let codeLines = codeString.split("\n");
+            if(codeLines.length < 2) {
+                return codeString;
+            }
+            for(let i = 1; i < codeLines.length; i++) {
+                let lastLine = codeLines[i-1];
+                let currentLine = codeLines[i];
+                if(currentLine.slice(0,5) == "delay") {
+                    if(lastLine.slice(0,5) == "delay") {
+                        let currentDelay = currentLine.slice(6,currentLine.length-2);
+                        let lastDelay = lastLine.slice(6, lastLine.length-2);
+                        let newLineCode = "delay(" + (parseInt(currentDelay)+parseInt(lastDelay)) + ");";
+                        codeLines.splice(i-1, 2, newLineCode);
+                        // effectively 1 item has been removed behind 'i'
+                        i--;
+                    } else {
+                        continue;
+                    }
+                } else {
+                    // 'i' can be double incremented, because the next iteration lastLine won't be a delay.
+                    i++;
+                    continue;
+                }
+            }
+            let compactCodeString = "";
+            for(let i = 0; i < codeLines.length; i++) {
+                compactCodeString += codeLines[i] + "\n";
+            }
+            return compactCodeString;
+        }
+
+
+        // Iterate over the frames and on each frame generate code to display the frame
+        // See information available in frames above.
+        function generateCode() {
+            //    LEDs[i];                                              indexes the ith LED.
+            //    CRGB(0-255,0-255,0-255);                              Defines an RGB color.
+            //    delay(milliseconds);                                  delays.
+            //    FastLED.show();                                       Updates the display.
+
+            let codeString = "";
+            for(let i = 0; i < frames.length; i++) {
+                let lastFrame, lastFrameValues, lastFrameValueKeys;
+                let currentFrame = frames[i];
+                let frameValues = currentFrame["values"];
+                let frameValueKeys = Object.keys(frameValues);
+
+                // If the last frame exists, do a diffing algorithm to minimize the length of arduino code.
+                if(i > 0) {
+                    let updateFlag = false;
+                    let lastFrame = frames[i - 1];
+                    let lastFrameValues = lastFrame["values"];
+                    let lastFrameValueKeys = Object.keys(lastFrameValues);
+
+                    // Keys that are in frame 1 but not frame 2 need to be cleared manually.
+                    let clearKeys = lastFrameValueKeys.filter(x => !frameValueKeys.includes(x));
+                    for(let k = 0; k < clearKeys.length; k++) {
+                        codeString += "LEDs[" + clearKeys[k] + "] = CRGB(0,0,0);\n";
+                    }
+
+                    // Keys that are only in frame 2 must be updated.
+                    let updateKeys = frameValueKeys.filter(x => !lastFrameValueKeys.includes(x));
+                    for(let k = 0; k < updateKeys.length; k++) {
+                        let updateKey = updateKeys[k];
+                        codeString += "LEDs[" + updateKey + "] = CRGB(" + hexToCRGBString(frameValues[updateKey]) + ");\n";
+                    }
+
+                    // Keys that are in both frame 1 and 2 should only be updated if they have a different value.
+                    let intersectionKeys = frameValueKeys.filter(x => lastFrameValueKeys.includes(x));
+                    for(let k = 0; k < intersectionKeys.length; k++) {
+                        let intersectionKey = intersectionKeys[k];
+                        if(lastFrameValues[intersectionKey] != frameValues[intersectionKey]) {
+                            codeString += "LEDs[" + intersectionKey + "] = CRGB(" + hexToCRGBString(frameValues[intersectionKey]) + ");\n";
+                            updateFlag = true;
+                        }
+                    }
+
+                    // If there are no updates, only include a delay line.
+                    if(updateFlag || (updateKeys.length > 0) || (clearKeys.length > 0)) {
+                        codeString += "FastLED.show();\n";
+                    }
+                } else {
+                    // The first frame should just update everything.
+                    for(let j = 0; j < frameValueKeys.length; j++) {
+                        let currentKey = frameValueKeys[j];
+                        codeString += "LEDs[" + currentKey + "] = CRGB(" + hexToCRGBString(frameValues[currentKey]) + ");\n";
+                    }
+                    codeString += "FastLED.show();\n";
+                }
+
+                codeString += "delay(" + currentFrame["frameDuration"] + ");\n";
+            }
+
+            codeString = combineDelays(codeString);
+
+            console.log(codeString);
+        }
+    </script>
+</head>
+<body>
+<div class="row">
+    <div class="col">
+        <button type="button" class="btn btn-primary control-position" onclick="saveFrame()">Save Frame</button>
+    </div>
+    <div class="col">
+        <button type="button" class="btn btn-primary control-position" onclick="getFrames()">Get Frames</button>
+    </div>
+    <div class="col">
+        <button type="button" class="btn btn-primary control-position" onclick="generateCode()">Generate Code</button>
+    </div>
+    <div class="col">
+        <button type="button" class="btn btn-primary control-position" onclick="clearBoard()">Clear Board</button>
+    </div>
+    <div class="col">
+        <button type="button" class="btn btn-primary control-position" onclick="animationPlayback()">Play Animation</button>
+    </div>
+    <div class="col">
+        <div class="form-outline control-position" style="width: 22rem;">
+            <input value="50" type="number" id="frameDuration" class="form-control" />
+            <label class="form-label" for="frameDuration">Frame duration</label>
+        </div>
+    </div>
+    <div class="col">
+        <div class="form-outline control-position" style="width: 22rem;">
+            <input value="#ff0000" type="color" id="LEDColor" class="form-control" onchange="newLEDColor()" />
+            <label class="form-label" for="LEDColor">LED Color</label>
+        </div>
+    </div>
+</div>
+<img src="/img/SkateboardDeckImage.jpg" style="width: 1800px; height: auto; position: absolute; z-index: -10">
+<div id="LEDArray">
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED1" onclick="activateLED('LED1')" class="col skateLED"></div>
+        <div id="LED2" onclick="activateLED('LED2')" class="col skateLED"></div>
+        <div id="LED3" onclick="activateLED('LED3')" class="col skateLED"></div>
+        <div id="LED4" onclick="activateLED('LED4')" class="col skateLED"></div>
+        <div id="LED5" onclick="activateLED('LED5')" class="col skateLED"></div>
+        <div id="LED6" onclick="activateLED('LED6')" class="col skateLED"></div>
+        <div id="LED7" onclick="activateLED('LED7')" class="col skateLED"></div>
+        <div id="LED8" onclick="activateLED('LED8')" class="col skateLED"></div>
+        <div id="LED9" onclick="activateLED('LED9')" class="col skateLED"></div>
+        <div id="LED10" onclick="activateLED('LED10')" class="col skateLED"></div>
+        <div id="LED11" onclick="activateLED('LED11')" class="col skateLED"></div>
+        <div id="LED12" onclick="activateLED('LED12')" class="col skateLED"></div>
+        <div id="LED13" onclick="activateLED('LED13')" class="col skateLED"></div>
+        <div id="LED14" onclick="activateLED('LED14')" class="col skateLED"></div>
+        <div id="LED15" onclick="activateLED('LED15')" class="col skateLED"></div>
+        <div id="LED16" onclick="activateLED('LED16')" class="col skateLED"></div>
+        <div id="LED17" onclick="activateLED('LED17')" class="col skateLED"></div>
+        <div id="LED18" onclick="activateLED('LED18')" class="col skateLED"></div>
+        <div id="LED19" onclick="activateLED('LED19')" class="col skateLED"></div>
+        <div id="LED20" onclick="activateLED('LED20')" class="col skateLED"></div>
+        <div id="LED21" onclick="activateLED('LED21')" class="col skateLED"></div>
+        <div id="LED22" onclick="activateLED('LED22')" class="col skateLED"></div>
+        <div id="LED23" onclick="activateLED('LED23')" class="col skateLED"></div>
+        <div id="LED24" onclick="activateLED('LED24')" class="col skateLED"></div>
+        <div id="LED25" onclick="activateLED('LED25')" class="col skateLED"></div>
+        <div id="LED26" onclick="activateLED('LED26')" class="col skateLED"></div>
+        <div id="LED27" onclick="activateLED('LED27')" class="col skateLED"></div>
+        <div id="LED28" onclick="activateLED('LED28')" class="col skateLED"></div>
+        <div id="LED29" onclick="activateLED('LED29')" class="col skateLED"></div>
+        <div id="LED30" onclick="activateLED('LED30')" class="col skateLED"></div>
+        <div id="LED31" onclick="activateLED('LED31')" class="col skateLED"></div>
+        <div id="LED32" onclick="activateLED('LED32')" class="col skateLED"></div>
+        <div id="LED33" onclick="activateLED('LED33')" class="col skateLED"></div>
+        <div id="LED34" onclick="activateLED('LED34')" class="col skateLED"></div>
+        <div id="LED35" onclick="activateLED('LED35')" class="col skateLED"></div>
+        <div id="LED36" onclick="activateLED('LED36')" class="col skateLED"></div>
+        <div id="LED37" onclick="activateLED('LED37')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED38" onclick="activateLED('LED38')" class="col skateLED"></div>
+        <div id="LED39" onclick="activateLED('LED39')" class="col skateLED"></div>
+        <div id="LED40" onclick="activateLED('LED40')" class="col skateLED"></div>
+        <div id="LED41" onclick="activateLED('LED41')" class="col skateLED"></div>
+        <div id="LED42" onclick="activateLED('LED42')" class="col skateLED"></div>
+        <div id="LED43" onclick="activateLED('LED43')" class="col skateLED"></div>
+        <div id="LED44" onclick="activateLED('LED44')" class="col skateLED"></div>
+        <div id="LED45" onclick="activateLED('LED45')" class="col skateLED"></div>
+        <div id="LED46" onclick="activateLED('LED46')" class="col skateLED"></div>
+        <div id="LED47" onclick="activateLED('LED47')" class="col skateLED"></div>
+        <div id="LED48" onclick="activateLED('LED48')" class="col skateLED"></div>
+        <div id="LED49" onclick="activateLED('LED49')" class="col skateLED"></div>
+        <div id="LED50" onclick="activateLED('LED50')" class="col skateLED"></div>
+        <div id="LED51" onclick="activateLED('LED51')" class="col skateLED"></div>
+        <div id="LED52" onclick="activateLED('LED52')" class="col skateLED"></div>
+        <div id="LED53" onclick="activateLED('LED53')" class="col skateLED"></div>
+        <div id="LED54" onclick="activateLED('LED54')" class="col skateLED"></div>
+        <div id="LED55" onclick="activateLED('LED55')" class="col skateLED"></div>
+        <div id="LED56" onclick="activateLED('LED56')" class="col skateLED"></div>
+        <div id="LED57" onclick="activateLED('LED57')" class="col skateLED"></div>
+        <div id="LED58" onclick="activateLED('LED58')" class="col skateLED"></div>
+        <div id="LED59" onclick="activateLED('LED59')" class="col skateLED"></div>
+        <div id="LED60" onclick="activateLED('LED60')" class="col skateLED"></div>
+        <div id="LED61" onclick="activateLED('LED61')" class="col skateLED"></div>
+        <div id="LED62" onclick="activateLED('LED62')" class="col skateLED"></div>
+        <div id="LED63" onclick="activateLED('LED63')" class="col skateLED"></div>
+        <div id="LED64" onclick="activateLED('LED64')" class="col skateLED"></div>
+        <div id="LED65" onclick="activateLED('LED65')" class="col skateLED"></div>
+        <div id="LED66" onclick="activateLED('LED66')" class="col skateLED"></div>
+        <div id="LED67" onclick="activateLED('LED67')" class="col skateLED"></div>
+        <div id="LED68" onclick="activateLED('LED68')" class="col skateLED"></div>
+        <div id="LED69" onclick="activateLED('LED69')" class="col skateLED"></div>
+        <div id="LED70" onclick="activateLED('LED70')" class="col skateLED"></div>
+        <div id="LED71" onclick="activateLED('LED71')" class="col skateLED"></div>
+        <div id="LED72" onclick="activateLED('LED72')" class="col skateLED"></div>
+        <div id="LED73" onclick="activateLED('LED73')" class="col skateLED"></div>
+        <div id="LED74" onclick="activateLED('LED74')" class="col skateLED"></div>
+        <div id="LED75" onclick="activateLED('LED75')" class="col skateLED"></div>
+        <div id="LED76" onclick="activateLED('LED76')" class="col skateLED"></div>
+        <div id="LED77" onclick="activateLED('LED77')" class="col skateLED"></div>
+        <div id="LED78" onclick="activateLED('LED78')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED79" onclick="activateLED('LED79')" class="col skateLED"></div>
+        <div id="LED80" onclick="activateLED('LED80')" class="col skateLED"></div>
+        <div id="LED81" onclick="activateLED('LED81')" class="col skateLED"></div>
+        <div id="LED82" onclick="activateLED('LED82')" class="col skateLED"></div>
+        <div id="LED83" onclick="activateLED('LED83')" class="col skateLED"></div>
+        <div id="LED84" onclick="activateLED('LED84')" class="col skateLED"></div>
+        <div id="LED85" onclick="activateLED('LED85')" class="col skateLED"></div>
+        <div id="LED86" onclick="activateLED('LED86')" class="col skateLED"></div>
+        <div id="LED87" onclick="activateLED('LED87')" class="col skateLED"></div>
+        <div id="LED88" onclick="activateLED('LED88')" class="col skateLED"></div>
+        <div id="LED89" onclick="activateLED('LED89')" class="col skateLED"></div>
+        <div id="LED90" onclick="activateLED('LED90')" class="col skateLED"></div>
+        <div id="LED91" onclick="activateLED('LED91')" class="col skateLED"></div>
+        <div id="LED92" onclick="activateLED('LED92')" class="col skateLED"></div>
+        <div id="LED93" onclick="activateLED('LED93')" class="col skateLED"></div>
+        <div id="LED94" onclick="activateLED('LED94')" class="col skateLED"></div>
+        <div id="LED95" onclick="activateLED('LED95')" class="col skateLED"></div>
+        <div id="LED96" onclick="activateLED('LED96')" class="col skateLED"></div>
+        <div id="LED97" onclick="activateLED('LED97')" class="col skateLED"></div>
+        <div id="LED98" onclick="activateLED('LED98')" class="col skateLED"></div>
+        <div id="LED99" onclick="activateLED('LED99')" class="col skateLED"></div>
+        <div id="LED100" onclick="activateLED('LED100')" class="col skateLED"></div>
+        <div id="LED101" onclick="activateLED('LED101')" class="col skateLED"></div>
+        <div id="LED102" onclick="activateLED('LED102')" class="col skateLED"></div>
+        <div id="LED103" onclick="activateLED('LED103')" class="col skateLED"></div>
+        <div id="LED104" onclick="activateLED('LED104')" class="col skateLED"></div>
+        <div id="LED105" onclick="activateLED('LED105')" class="col skateLED"></div>
+        <div id="LED106" onclick="activateLED('LED106')" class="col skateLED"></div>
+        <div id="LED107" onclick="activateLED('LED107')" class="col skateLED"></div>
+        <div id="LED108" onclick="activateLED('LED108')" class="col skateLED"></div>
+        <div id="LED109" onclick="activateLED('LED109')" class="col skateLED"></div>
+        <div id="LED110" onclick="activateLED('LED110')" class="col skateLED"></div>
+        <div id="LED111" onclick="activateLED('LED111')" class="col skateLED"></div>
+        <div id="LED112" onclick="activateLED('LED112')" class="col skateLED"></div>
+        <div id="LED113" onclick="activateLED('LED113')" class="col skateLED"></div>
+        <div id="LED114" onclick="activateLED('LED114')" class="col skateLED"></div>
+        <div id="LED115" onclick="activateLED('LED115')" class="col skateLED"></div>
+        <div id="LED116" onclick="activateLED('LED116')" class="col skateLED"></div>
+        <div id="LED117" onclick="activateLED('LED117')" class="col skateLED"></div>
+        <div id="LED118" onclick="activateLED('LED118')" class="col skateLED"></div>
+        <div id="LED119" onclick="activateLED('LED119')" class="col skateLED"></div>
+        <div id="LED120" onclick="activateLED('LED120')" class="col skateLED"></div>
+        <div id="LED121" onclick="activateLED('LED121')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED122" onclick="activateLED('LED122')" class="col skateLED"></div>
+        <div id="LED123" onclick="activateLED('LED123')" class="col skateLED"></div>
+        <div id="LED124" onclick="activateLED('LED124')" class="col skateLED"></div>
+        <div id="LED125" onclick="activateLED('LED125')" class="col skateLED"></div>
+        <div id="LED126" onclick="activateLED('LED126')" class="col skateLED"></div>
+        <div id="LED127" onclick="activateLED('LED127')" class="col skateLED"></div>
+        <div id="LED128" onclick="activateLED('LED128')" class="col skateLED"></div>
+        <div id="LED129" onclick="activateLED('LED129')" class="col skateLED"></div>
+        <div id="LED130" onclick="activateLED('LED130')" class="col skateLED"></div>
+        <div id="LED131" onclick="activateLED('LED131')" class="col skateLED"></div>
+        <div id="LED132" onclick="activateLED('LED132')" class="col skateLED"></div>
+        <div id="LED133" onclick="activateLED('LED133')" class="col skateLED"></div>
+        <div id="LED134" onclick="activateLED('LED134')" class="col skateLED"></div>
+        <div id="LED135" onclick="activateLED('LED135')" class="col skateLED"></div>
+        <div id="LED136" onclick="activateLED('LED136')" class="col skateLED"></div>
+        <div id="LED137" onclick="activateLED('LED137')" class="col skateLED"></div>
+        <div id="LED138" onclick="activateLED('LED138')" class="col skateLED"></div>
+        <div id="LED139" onclick="activateLED('LED139')" class="col skateLED"></div>
+        <div id="LED140" onclick="activateLED('LED140')" class="col skateLED"></div>
+        <div id="LED141" onclick="activateLED('LED141')" class="col skateLED"></div>
+        <div id="LED142" onclick="activateLED('LED142')" class="col skateLED"></div>
+        <div id="LED143" onclick="activateLED('LED143')" class="col skateLED"></div>
+        <div id="LED144" onclick="activateLED('LED144')" class="col skateLED"></div>
+        <div id="LED145" onclick="activateLED('LED145')" class="col skateLED"></div>
+        <div id="LED146" onclick="activateLED('LED146')" class="col skateLED"></div>
+        <div id="LED147" onclick="activateLED('LED147')" class="col skateLED"></div>
+        <div id="LED148" onclick="activateLED('LED148')" class="col skateLED"></div>
+        <div id="LED149" onclick="activateLED('LED149')" class="col skateLED"></div>
+        <div id="LED150" onclick="activateLED('LED150')" class="col skateLED"></div>
+        <div id="LED151" onclick="activateLED('LED151')" class="col skateLED"></div>
+        <div id="LED152" onclick="activateLED('LED152')" class="col skateLED"></div>
+        <div id="LED153" onclick="activateLED('LED153')" class="col skateLED"></div>
+        <div id="LED154" onclick="activateLED('LED154')" class="col skateLED"></div>
+        <div id="LED155" onclick="activateLED('LED155')" class="col skateLED"></div>
+        <div id="LED156" onclick="activateLED('LED156')" class="col skateLED"></div>
+        <div id="LED157" onclick="activateLED('LED157')" class="col skateLED"></div>
+        <div id="LED158" onclick="activateLED('LED158')" class="col skateLED"></div>
+        <div id="LED159" onclick="activateLED('LED159')" class="col skateLED"></div>
+        <div id="LED160" onclick="activateLED('LED160')" class="col skateLED"></div>
+        <div id="LED161" onclick="activateLED('LED161')" class="col skateLED"></div>
+        <div id="LED162" onclick="activateLED('LED162')" class="col skateLED"></div>
+        <div id="LED163" onclick="activateLED('LED163')" class="col skateLED"></div>
+        <div id="LED164" onclick="activateLED('LED164')" class="col skateLED"></div>
+        <div id="LED165" onclick="activateLED('LED165')" class="col skateLED"></div>
+        <div id="LED166" onclick="activateLED('LED166')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED167" onclick="activateLED('LED167')" class="col skateLED"></div>
+        <div id="LED168" onclick="activateLED('LED168')" class="col skateLED"></div>
+        <div id="LED169" onclick="activateLED('LED169')" class="col skateLED"></div>
+        <div id="LED170" onclick="activateLED('LED170')" class="col skateLED"></div>
+        <div id="LED171" onclick="activateLED('LED171')" class="col skateLED"></div>
+        <div id="LED172" onclick="activateLED('LED172')" class="col skateLED"></div>
+        <div id="LED173" onclick="activateLED('LED173')" class="col skateLED"></div>
+        <div id="LED174" onclick="activateLED('LED174')" class="col skateLED"></div>
+        <div id="LED175" onclick="activateLED('LED175')" class="col skateLED"></div>
+        <div id="LED176" onclick="activateLED('LED176')" class="col skateLED"></div>
+        <div id="LED177" onclick="activateLED('LED177')" class="col skateLED"></div>
+        <div id="LED178" onclick="activateLED('LED178')" class="col skateLED"></div>
+        <div id="LED179" onclick="activateLED('LED179')" class="col skateLED"></div>
+        <div id="LED180" onclick="activateLED('LED180')" class="col skateLED"></div>
+        <div id="LED181" onclick="activateLED('LED181')" class="col skateLED"></div>
+        <div id="LED182" onclick="activateLED('LED182')" class="col skateLED"></div>
+        <div id="LED183" onclick="activateLED('LED183')" class="col skateLED"></div>
+        <div id="LED184" onclick="activateLED('LED184')" class="col skateLED"></div>
+        <div id="LED185" onclick="activateLED('LED185')" class="col skateLED"></div>
+        <div id="LED186" onclick="activateLED('LED186')" class="col skateLED"></div>
+        <div id="LED187" onclick="activateLED('LED187')" class="col skateLED"></div>
+        <div id="LED188" onclick="activateLED('LED188')" class="col skateLED"></div>
+        <div id="LED189" onclick="activateLED('LED189')" class="col skateLED"></div>
+        <div id="LED190" onclick="activateLED('LED190')" class="col skateLED"></div>
+        <div id="LED191" onclick="activateLED('LED191')" class="col skateLED"></div>
+        <div id="LED192" onclick="activateLED('LED192')" class="col skateLED"></div>
+        <div id="LED193" onclick="activateLED('LED193')" class="col skateLED"></div>
+        <div id="LED194" onclick="activateLED('LED194')" class="col skateLED"></div>
+        <div id="LED195" onclick="activateLED('LED195')" class="col skateLED"></div>
+        <div id="LED196" onclick="activateLED('LED196')" class="col skateLED"></div>
+        <div id="LED197" onclick="activateLED('LED197')" class="col skateLED"></div>
+        <div id="LED198" onclick="activateLED('LED198')" class="col skateLED"></div>
+        <div id="LED199" onclick="activateLED('LED199')" class="col skateLED"></div>
+        <div id="LED200" onclick="activateLED('LED200')" class="col skateLED"></div>
+        <div id="LED201" onclick="activateLED('LED201')" class="col skateLED"></div>
+        <div id="LED202" onclick="activateLED('LED202')" class="col skateLED"></div>
+        <div id="LED203" onclick="activateLED('LED203')" class="col skateLED"></div>
+        <div id="LED204" onclick="activateLED('LED204')" class="col skateLED"></div>
+        <div id="LED205" onclick="activateLED('LED205')" class="col skateLED"></div>
+        <div id="LED206" onclick="activateLED('LED206')" class="col skateLED"></div>
+        <div id="LED207" onclick="activateLED('LED207')" class="col skateLED"></div>
+        <div id="LED208" onclick="activateLED('LED208')" class="col skateLED"></div>
+        <div id="LED209" onclick="activateLED('LED209')" class="col skateLED"></div>
+        <div id="LED210" onclick="activateLED('LED210')" class="col skateLED"></div>
+        <div id="LED211" onclick="activateLED('LED211')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div id="LED212" onclick="activateLED('LED212')" class="col skateLED"></div>
+        <div id="LED213" onclick="activateLED('LED213')" class="col skateLED"></div>
+        <div id="LED214" onclick="activateLED('LED214')" class="col skateLED"></div>
+        <div id="LED215" onclick="activateLED('LED215')" class="col skateLED"></div>
+        <div id="LED216" onclick="activateLED('LED216')" class="col skateLED"></div>
+        <div id="LED217" onclick="activateLED('LED217')" class="col skateLED"></div>
+        <div id="LED218" onclick="activateLED('LED218')" class="col skateLED"></div>
+        <div id="LED219" onclick="activateLED('LED219')" class="col skateLED"></div>
+        <div id="LED220" onclick="activateLED('LED220')" class="col skateLED"></div>
+        <div id="LED221" onclick="activateLED('LED221')" class="col skateLED"></div>
+        <div id="LED222" onclick="activateLED('LED222')" class="col skateLED"></div>
+        <div id="LED223" onclick="activateLED('LED223')" class="col skateLED"></div>
+        <div id="LED224" onclick="activateLED('LED224')" class="col skateLED"></div>
+        <div id="LED225" onclick="activateLED('LED225')" class="col skateLED"></div>
+        <div id="LED226" onclick="activateLED('LED226')" class="col skateLED"></div>
+        <div id="LED227" onclick="activateLED('LED227')" class="col skateLED"></div>
+        <div id="LED228" onclick="activateLED('LED228')" class="col skateLED"></div>
+        <div id="LED229" onclick="activateLED('LED229')" class="col skateLED"></div>
+        <div id="LED230" onclick="activateLED('LED230')" class="col skateLED"></div>
+        <div id="LED231" onclick="activateLED('LED231')" class="col skateLED"></div>
+        <div id="LED232" onclick="activateLED('LED232')" class="col skateLED"></div>
+        <div id="LED233" onclick="activateLED('LED233')" class="col skateLED"></div>
+        <div id="LED234" onclick="activateLED('LED234')" class="col skateLED"></div>
+        <div id="LED235" onclick="activateLED('LED235')" class="col skateLED"></div>
+        <div id="LED236" onclick="activateLED('LED236')" class="col skateLED"></div>
+        <div id="LED237" onclick="activateLED('LED237')" class="col skateLED"></div>
+        <div id="LED238" onclick="activateLED('LED238')" class="col skateLED"></div>
+        <div id="LED239" onclick="activateLED('LED239')" class="col skateLED"></div>
+        <div id="LED240" onclick="activateLED('LED240')" class="col skateLED"></div>
+        <div id="LED241" onclick="activateLED('LED241')" class="col skateLED"></div>
+        <div id="LED242" onclick="activateLED('LED242')" class="col skateLED"></div>
+        <div id="LED243" onclick="activateLED('LED243')" class="col skateLED"></div>
+        <div id="LED244" onclick="activateLED('LED244')" class="col skateLED"></div>
+        <div id="LED245" onclick="activateLED('LED245')" class="col skateLED"></div>
+        <div id="LED246" onclick="activateLED('LED246')" class="col skateLED"></div>
+        <div id="LED247" onclick="activateLED('LED247')" class="col skateLED"></div>
+        <div id="LED248" onclick="activateLED('LED248')" class="col skateLED"></div>
+        <div id="LED249" onclick="activateLED('LED249')" class="col skateLED"></div>
+        <div id="LED250" onclick="activateLED('LED250')" class="col skateLED"></div>
+        <div id="LED251" onclick="activateLED('LED251')" class="col skateLED"></div>
+        <div id="LED252" onclick="activateLED('LED252')" class="col skateLED"></div>
+        <div id="LED253" onclick="activateLED('LED253')" class="col skateLED"></div>
+        <div id="LED254" onclick="activateLED('LED254')" class="col skateLED"></div>
+        <div id="LED255" onclick="activateLED('LED255')" class="col skateLED"></div>
+        <div id="LED256" onclick="activateLED('LED256')" class="col skateLED"></div>
+        <div id="LED257" onclick="activateLED('LED257')" class="col skateLED"></div>
+        <div id="LED258" onclick="activateLED('LED258')" class="col skateLED"></div>
+    </div>
+    <div class="row">
+        <div id="LED259" onclick="activateLED('LED259')" class="col skateLED"></div>
+        <div id="LED260" onclick="activateLED('LED260')" class="col skateLED"></div>
+        <div id="LED261" onclick="activateLED('LED261')" class="col skateLED"></div>
+        <div id="LED262" onclick="activateLED('LED262')" class="col skateLED"></div>
+        <div id="LED263" onclick="activateLED('LED263')" class="col skateLED"></div>
+        <div id="LED264" onclick="activateLED('LED264')" class="col skateLED"></div>
+        <div id="LED265" onclick="activateLED('LED265')" class="col skateLED"></div>
+        <div id="LED266" onclick="activateLED('LED266')" class="col skateLED"></div>
+        <div id="LED267" onclick="activateLED('LED267')" class="col skateLED"></div>
+        <div id="LED268" onclick="activateLED('LED268')" class="col skateLED"></div>
+        <div id="LED269" onclick="activateLED('LED269')" class="col skateLED"></div>
+        <div id="LED270" onclick="activateLED('LED270')" class="col skateLED"></div>
+        <div id="LED271" onclick="activateLED('LED271')" class="col skateLED"></div>
+        <div id="LED272" onclick="activateLED('LED272')" class="col skateLED"></div>
+        <div id="LED273" onclick="activateLED('LED273')" class="col skateLED"></div>
+        <div id="LED274" onclick="activateLED('LED274')" class="col skateLED"></div>
+        <div id="LED275" onclick="activateLED('LED275')" class="col skateLED"></div>
+        <div id="LED276" onclick="activateLED('LED276')" class="col skateLED"></div>
+        <div id="LED277" onclick="activateLED('LED277')" class="col skateLED"></div>
+        <div id="LED278" onclick="activateLED('LED278')" class="col skateLED"></div>
+        <div id="LED279" onclick="activateLED('LED279')" class="col skateLED"></div>
+        <div id="LED280" onclick="activateLED('LED280')" class="col skateLED"></div>
+        <div id="LED281" onclick="activateLED('LED281')" class="col skateLED"></div>
+        <div id="LED282" onclick="activateLED('LED282')" class="col skateLED"></div>
+        <div id="LED283" onclick="activateLED('LED283')" class="col skateLED"></div>
+        <div id="LED284" onclick="activateLED('LED284')" class="col skateLED"></div>
+        <div id="LED285" onclick="activateLED('LED285')" class="col skateLED"></div>
+        <div id="LED286" onclick="activateLED('LED286')" class="col skateLED"></div>
+        <div id="LED287" onclick="activateLED('LED287')" class="col skateLED"></div>
+        <div id="LED288" onclick="activateLED('LED288')" class="col skateLED"></div>
+        <div id="LED289" onclick="activateLED('LED289')" class="col skateLED"></div>
+        <div id="LED290" onclick="activateLED('LED290')" class="col skateLED"></div>
+        <div id="LED291" onclick="activateLED('LED291')" class="col skateLED"></div>
+        <div id="LED292" onclick="activateLED('LED292')" class="col skateLED"></div>
+        <div id="LED293" onclick="activateLED('LED293')" class="col skateLED"></div>
+        <div id="LED294" onclick="activateLED('LED294')" class="col skateLED"></div>
+        <div id="LED295" onclick="activateLED('LED295')" class="col skateLED"></div>
+        <div id="LED296" onclick="activateLED('LED296')" class="col skateLED"></div>
+        <div id="LED297" onclick="activateLED('LED297')" class="col skateLED"></div>
+        <div id="LED298" onclick="activateLED('LED298')" class="col skateLED"></div>
+        <div id="LED299" onclick="activateLED('LED299')" class="col skateLED"></div>
+        <div id="LED300" onclick="activateLED('LED300')" class="col skateLED"></div>
+        <div id="LED301" onclick="activateLED('LED301')" class="col skateLED"></div>
+        <div id="LED302" onclick="activateLED('LED302')" class="col skateLED"></div>
+        <div id="LED303" onclick="activateLED('LED303')" class="col skateLED"></div>
+        <div id="LED304" onclick="activateLED('LED304')" class="col skateLED"></div>
+        <div id="LED305" onclick="activateLED('LED305')" class="col skateLED"></div>
+    </div>
+    <div class="row">
+        <div id="LED306" onclick="activateLED('LED306')" class="col skateLED"></div>
+        <div id="LED307" onclick="activateLED('LED307')" class="col skateLED"></div>
+        <div id="LED308" onclick="activateLED('LED308')" class="col skateLED"></div>
+        <div id="LED309" onclick="activateLED('LED309')" class="col skateLED"></div>
+        <div id="LED310" onclick="activateLED('LED310')" class="col skateLED"></div>
+        <div id="LED311" onclick="activateLED('LED311')" class="col skateLED"></div>
+        <div id="LED312" onclick="activateLED('LED312')" class="col skateLED"></div>
+        <div id="LED313" onclick="activateLED('LED313')" class="col skateLED"></div>
+        <div id="LED314" onclick="activateLED('LED314')" class="col skateLED"></div>
+        <div id="LED315" onclick="activateLED('LED315')" class="col skateLED"></div>
+        <div id="LED316" onclick="activateLED('LED316')" class="col skateLED"></div>
+        <div id="LED317" onclick="activateLED('LED317')" class="col skateLED"></div>
+        <div id="LED318" onclick="activateLED('LED318')" class="col skateLED"></div>
+        <div id="LED319" onclick="activateLED('LED319')" class="col skateLED"></div>
+        <div id="LED320" onclick="activateLED('LED320')" class="col skateLED"></div>
+        <div id="LED321" onclick="activateLED('LED321')" class="col skateLED"></div>
+        <div id="LED322" onclick="activateLED('LED322')" class="col skateLED"></div>
+        <div id="LED323" onclick="activateLED('LED323')" class="col skateLED"></div>
+        <div id="LED324" onclick="activateLED('LED324')" class="col skateLED"></div>
+        <div id="LED325" onclick="activateLED('LED325')" class="col skateLED"></div>
+        <div id="LED326" onclick="activateLED('LED326')" class="col skateLED"></div>
+        <div id="LED327" onclick="activateLED('LED327')" class="col skateLED"></div>
+        <div id="LED328" onclick="activateLED('LED328')" class="col skateLED"></div>
+        <div id="LED329" onclick="activateLED('LED329')" class="col skateLED"></div>
+        <div id="LED330" onclick="activateLED('LED330')" class="col skateLED"></div>
+        <div id="LED331" onclick="activateLED('LED331')" class="col skateLED"></div>
+        <div id="LED332" onclick="activateLED('LED332')" class="col skateLED"></div>
+        <div id="LED333" onclick="activateLED('LED333')" class="col skateLED"></div>
+        <div id="LED334" onclick="activateLED('LED334')" class="col skateLED"></div>
+        <div id="LED335" onclick="activateLED('LED335')" class="col skateLED"></div>
+        <div id="LED336" onclick="activateLED('LED336')" class="col skateLED"></div>
+        <div id="LED337" onclick="activateLED('LED337')" class="col skateLED"></div>
+        <div id="LED338" onclick="activateLED('LED338')" class="col skateLED"></div>
+        <div id="LED339" onclick="activateLED('LED339')" class="col skateLED"></div>
+        <div id="LED340" onclick="activateLED('LED340')" class="col skateLED"></div>
+        <div id="LED341" onclick="activateLED('LED341')" class="col skateLED"></div>
+        <div id="LED342" onclick="activateLED('LED342')" class="col skateLED"></div>
+        <div id="LED343" onclick="activateLED('LED343')" class="col skateLED"></div>
+        <div id="LED344" onclick="activateLED('LED344')" class="col skateLED"></div>
+        <div id="LED345" onclick="activateLED('LED345')" class="col skateLED"></div>
+        <div id="LED346" onclick="activateLED('LED346')" class="col skateLED"></div>
+        <div id="LED347" onclick="activateLED('LED347')" class="col skateLED"></div>
+        <div id="LED348" onclick="activateLED('LED348')" class="col skateLED"></div>
+        <div id="LED349" onclick="activateLED('LED349')" class="col skateLED"></div>
+        <div id="LED350" onclick="activateLED('LED350')" class="col skateLED"></div>
+        <div id="LED351" onclick="activateLED('LED351')" class="col skateLED"></div>
+        <div id="LED352" onclick="activateLED('LED352')" class="col skateLED"></div>
+    </div>
+    <div class="row">
+        <div id="LED353" onclick="activateLED('LED353')" class="col skateLED"></div>
+        <div id="LED354" onclick="activateLED('LED354')" class="col skateLED"></div>
+        <div id="LED355" onclick="activateLED('LED355')" class="col skateLED"></div>
+        <div id="LED356" onclick="activateLED('LED356')" class="col skateLED"></div>
+        <div id="LED357" onclick="activateLED('LED357')" class="col skateLED"></div>
+        <div id="LED358" onclick="activateLED('LED358')" class="col skateLED"></div>
+        <div id="LED359" onclick="activateLED('LED359')" class="col skateLED"></div>
+        <div id="LED360" onclick="activateLED('LED360')" class="col skateLED"></div>
+        <div id="LED361" onclick="activateLED('LED361')" class="col skateLED"></div>
+        <div id="LED362" onclick="activateLED('LED362')" class="col skateLED"></div>
+        <div id="LED363" onclick="activateLED('LED363')" class="col skateLED"></div>
+        <div id="LED364" onclick="activateLED('LED364')" class="col skateLED"></div>
+        <div id="LED365" onclick="activateLED('LED365')" class="col skateLED"></div>
+        <div id="LED366" onclick="activateLED('LED366')" class="col skateLED"></div>
+        <div id="LED367" onclick="activateLED('LED367')" class="col skateLED"></div>
+        <div id="LED368" onclick="activateLED('LED368')" class="col skateLED"></div>
+        <div id="LED369" onclick="activateLED('LED369')" class="col skateLED"></div>
+        <div id="LED370" onclick="activateLED('LED370')" class="col skateLED"></div>
+        <div id="LED371" onclick="activateLED('LED371')" class="col skateLED"></div>
+        <div id="LED372" onclick="activateLED('LED372')" class="col skateLED"></div>
+        <div id="LED373" onclick="activateLED('LED373')" class="col skateLED"></div>
+        <div id="LED374" onclick="activateLED('LED374')" class="col skateLED"></div>
+        <div id="LED375" onclick="activateLED('LED375')" class="col skateLED"></div>
+        <div id="LED376" onclick="activateLED('LED376')" class="col skateLED"></div>
+        <div id="LED377" onclick="activateLED('LED377')" class="col skateLED"></div>
+        <div id="LED378" onclick="activateLED('LED378')" class="col skateLED"></div>
+        <div id="LED379" onclick="activateLED('LED379')" class="col skateLED"></div>
+        <div id="LED380" onclick="activateLED('LED380')" class="col skateLED"></div>
+        <div id="LED381" onclick="activateLED('LED381')" class="col skateLED"></div>
+        <div id="LED382" onclick="activateLED('LED382')" class="col skateLED"></div>
+        <div id="LED383" onclick="activateLED('LED383')" class="col skateLED"></div>
+        <div id="LED384" onclick="activateLED('LED384')" class="col skateLED"></div>
+        <div id="LED385" onclick="activateLED('LED385')" class="col skateLED"></div>
+        <div id="LED386" onclick="activateLED('LED386')" class="col skateLED"></div>
+        <div id="LED387" onclick="activateLED('LED387')" class="col skateLED"></div>
+        <div id="LED388" onclick="activateLED('LED388')" class="col skateLED"></div>
+        <div id="LED389" onclick="activateLED('LED389')" class="col skateLED"></div>
+        <div id="LED390" onclick="activateLED('LED390')" class="col skateLED"></div>
+        <div id="LED391" onclick="activateLED('LED391')" class="col skateLED"></div>
+        <div id="LED392" onclick="activateLED('LED392')" class="col skateLED"></div>
+        <div id="LED393" onclick="activateLED('LED393')" class="col skateLED"></div>
+        <div id="LED394" onclick="activateLED('LED394')" class="col skateLED"></div>
+        <div id="LED395" onclick="activateLED('LED395')" class="col skateLED"></div>
+        <div id="LED396" onclick="activateLED('LED396')" class="col skateLED"></div>
+        <div id="LED397" onclick="activateLED('LED397')" class="col skateLED"></div>
+        <div id="LED398" onclick="activateLED('LED398')" class="col skateLED"></div>
+        <div id="LED399" onclick="activateLED('LED399')" class="col skateLED"></div>
+    </div>
+    <div class="row">
+        <div id="LED400" onclick="activateLED('LED400')" class="col skateLED"></div>
+        <div id="LED401" onclick="activateLED('LED401')" class="col skateLED"></div>
+        <div id="LED402" onclick="activateLED('LED402')" class="col skateLED"></div>
+        <div id="LED403" onclick="activateLED('LED403')" class="col skateLED"></div>
+        <div id="LED404" onclick="activateLED('LED404')" class="col skateLED"></div>
+        <div id="LED405" onclick="activateLED('LED405')" class="col skateLED"></div>
+        <div id="LED406" onclick="activateLED('LED406')" class="col skateLED"></div>
+        <div id="LED407" onclick="activateLED('LED407')" class="col skateLED"></div>
+        <div id="LED408" onclick="activateLED('LED408')" class="col skateLED"></div>
+        <div id="LED409" onclick="activateLED('LED409')" class="col skateLED"></div>
+        <div id="LED410" onclick="activateLED('LED410')" class="col skateLED"></div>
+        <div id="LED411" onclick="activateLED('LED411')" class="col skateLED"></div>
+        <div id="LED412" onclick="activateLED('LED412')" class="col skateLED"></div>
+        <div id="LED413" onclick="activateLED('LED413')" class="col skateLED"></div>
+        <div id="LED414" onclick="activateLED('LED414')" class="col skateLED"></div>
+        <div id="LED415" onclick="activateLED('LED415')" class="col skateLED"></div>
+        <div id="LED416" onclick="activateLED('LED416')" class="col skateLED"></div>
+        <div id="LED417" onclick="activateLED('LED417')" class="col skateLED"></div>
+        <div id="LED418" onclick="activateLED('LED418')" class="col skateLED"></div>
+        <div id="LED419" onclick="activateLED('LED419')" class="col skateLED"></div>
+        <div id="LED420" onclick="activateLED('LED420')" class="col skateLED"></div>
+        <div id="LED421" onclick="activateLED('LED421')" class="col skateLED"></div>
+        <div id="LED422" onclick="activateLED('LED422')" class="col skateLED"></div>
+        <div id="LED423" onclick="activateLED('LED423')" class="col skateLED"></div>
+        <div id="LED424" onclick="activateLED('LED424')" class="col skateLED"></div>
+        <div id="LED425" onclick="activateLED('LED425')" class="col skateLED"></div>
+        <div id="LED426" onclick="activateLED('LED426')" class="col skateLED"></div>
+        <div id="LED427" onclick="activateLED('LED427')" class="col skateLED"></div>
+        <div id="LED428" onclick="activateLED('LED428')" class="col skateLED"></div>
+        <div id="LED429" onclick="activateLED('LED429')" class="col skateLED"></div>
+        <div id="LED430" onclick="activateLED('LED430')" class="col skateLED"></div>
+        <div id="LED431" onclick="activateLED('LED431')" class="col skateLED"></div>
+        <div id="LED432" onclick="activateLED('LED432')" class="col skateLED"></div>
+        <div id="LED433" onclick="activateLED('LED433')" class="col skateLED"></div>
+        <div id="LED434" onclick="activateLED('LED434')" class="col skateLED"></div>
+        <div id="LED435" onclick="activateLED('LED435')" class="col skateLED"></div>
+        <div id="LED436" onclick="activateLED('LED436')" class="col skateLED"></div>
+        <div id="LED437" onclick="activateLED('LED437')" class="col skateLED"></div>
+        <div id="LED438" onclick="activateLED('LED438')" class="col skateLED"></div>
+        <div id="LED439" onclick="activateLED('LED439')" class="col skateLED"></div>
+        <div id="LED440" onclick="activateLED('LED440')" class="col skateLED"></div>
+        <div id="LED441" onclick="activateLED('LED441')" class="col skateLED"></div>
+        <div id="LED442" onclick="activateLED('LED442')" class="col skateLED"></div>
+        <div id="LED443" onclick="activateLED('LED443')" class="col skateLED"></div>
+        <div id="LED444" onclick="activateLED('LED444')" class="col skateLED"></div>
+        <div id="LED445" onclick="activateLED('LED445')" class="col skateLED"></div>
+        <div id="LED446" onclick="activateLED('LED446')" class="col skateLED"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED447" onclick="activateLED('LED447')" class="col skateLED"></div>
+        <div id="LED448" onclick="activateLED('LED448')" class="col skateLED"></div>
+        <div id="LED449" onclick="activateLED('LED449')" class="col skateLED"></div>
+        <div id="LED450" onclick="activateLED('LED450')" class="col skateLED"></div>
+        <div id="LED451" onclick="activateLED('LED451')" class="col skateLED"></div>
+        <div id="LED452" onclick="activateLED('LED452')" class="col skateLED"></div>
+        <div id="LED453" onclick="activateLED('LED453')" class="col skateLED"></div>
+        <div id="LED454" onclick="activateLED('LED454')" class="col skateLED"></div>
+        <div id="LED455" onclick="activateLED('LED455')" class="col skateLED"></div>
+        <div id="LED456" onclick="activateLED('LED456')" class="col skateLED"></div>
+        <div id="LED457" onclick="activateLED('LED457')" class="col skateLED"></div>
+        <div id="LED458" onclick="activateLED('LED458')" class="col skateLED"></div>
+        <div id="LED459" onclick="activateLED('LED459')" class="col skateLED"></div>
+        <div id="LED460" onclick="activateLED('LED460')" class="col skateLED"></div>
+        <div id="LED461" onclick="activateLED('LED461')" class="col skateLED"></div>
+        <div id="LED462" onclick="activateLED('LED462')" class="col skateLED"></div>
+        <div id="LED463" onclick="activateLED('LED463')" class="col skateLED"></div>
+        <div id="LED464" onclick="activateLED('LED464')" class="col skateLED"></div>
+        <div id="LED465" onclick="activateLED('LED465')" class="col skateLED"></div>
+        <div id="LED466" onclick="activateLED('LED466')" class="col skateLED"></div>
+        <div id="LED467" onclick="activateLED('LED467')" class="col skateLED"></div>
+        <div id="LED468" onclick="activateLED('LED468')" class="col skateLED"></div>
+        <div id="LED469" onclick="activateLED('LED469')" class="col skateLED"></div>
+        <div id="LED470" onclick="activateLED('LED470')" class="col skateLED"></div>
+        <div id="LED471" onclick="activateLED('LED471')" class="col skateLED"></div>
+        <div id="LED472" onclick="activateLED('LED472')" class="col skateLED"></div>
+        <div id="LED473" onclick="activateLED('LED473')" class="col skateLED"></div>
+        <div id="LED474" onclick="activateLED('LED474')" class="col skateLED"></div>
+        <div id="LED475" onclick="activateLED('LED475')" class="col skateLED"></div>
+        <div id="LED476" onclick="activateLED('LED476')" class="col skateLED"></div>
+        <div id="LED477" onclick="activateLED('LED477')" class="col skateLED"></div>
+        <div id="LED478" onclick="activateLED('LED478')" class="col skateLED"></div>
+        <div id="LED479" onclick="activateLED('LED479')" class="col skateLED"></div>
+        <div id="LED480" onclick="activateLED('LED480')" class="col skateLED"></div>
+        <div id="LED481" onclick="activateLED('LED481')" class="col skateLED"></div>
+        <div id="LED482" onclick="activateLED('LED482')" class="col skateLED"></div>
+        <div id="LED483" onclick="activateLED('LED483')" class="col skateLED"></div>
+        <div id="LED484" onclick="activateLED('LED484')" class="col skateLED"></div>
+        <div id="LED485" onclick="activateLED('LED485')" class="col skateLED"></div>
+        <div id="LED486" onclick="activateLED('LED486')" class="col skateLED"></div>
+        <div id="LED487" onclick="activateLED('LED487')" class="col skateLED"></div>
+        <div id="LED488" onclick="activateLED('LED488')" class="col skateLED"></div>
+        <div id="LED489" onclick="activateLED('LED489')" class="col skateLED"></div>
+        <div id="LED490" onclick="activateLED('LED490')" class="col skateLED"></div>
+        <div id="LED491" onclick="activateLED('LED491')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED492" onclick="activateLED('LED492')" class="col skateLED"></div>
+        <div id="LED493" onclick="activateLED('LED493')" class="col skateLED"></div>
+        <div id="LED494" onclick="activateLED('LED494')" class="col skateLED"></div>
+        <div id="LED495" onclick="activateLED('LED495')" class="col skateLED"></div>
+        <div id="LED496" onclick="activateLED('LED496')" class="col skateLED"></div>
+        <div id="LED497" onclick="activateLED('LED497')" class="col skateLED"></div>
+        <div id="LED498" onclick="activateLED('LED498')" class="col skateLED"></div>
+        <div id="LED499" onclick="activateLED('LED499')" class="col skateLED"></div>
+        <div id="LED500" onclick="activateLED('LED500')" class="col skateLED"></div>
+        <div id="LED501" onclick="activateLED('LED501')" class="col skateLED"></div>
+        <div id="LED502" onclick="activateLED('LED502')" class="col skateLED"></div>
+        <div id="LED503" onclick="activateLED('LED503')" class="col skateLED"></div>
+        <div id="LED504" onclick="activateLED('LED504')" class="col skateLED"></div>
+        <div id="LED505" onclick="activateLED('LED505')" class="col skateLED"></div>
+        <div id="LED506" onclick="activateLED('LED506')" class="col skateLED"></div>
+        <div id="LED507" onclick="activateLED('LED507')" class="col skateLED"></div>
+        <div id="LED508" onclick="activateLED('LED508')" class="col skateLED"></div>
+        <div id="LED509" onclick="activateLED('LED509')" class="col skateLED"></div>
+        <div id="LED510" onclick="activateLED('LED510')" class="col skateLED"></div>
+        <div id="LED511" onclick="activateLED('LED511')" class="col skateLED"></div>
+        <div id="LED512" onclick="activateLED('LED512')" class="col skateLED"></div>
+        <div id="LED513" onclick="activateLED('LED513')" class="col skateLED"></div>
+        <div id="LED514" onclick="activateLED('LED514')" class="col skateLED"></div>
+        <div id="LED515" onclick="activateLED('LED515')" class="col skateLED"></div>
+        <div id="LED516" onclick="activateLED('LED516')" class="col skateLED"></div>
+        <div id="LED517" onclick="activateLED('LED517')" class="col skateLED"></div>
+        <div id="LED518" onclick="activateLED('LED518')" class="col skateLED"></div>
+        <div id="LED519" onclick="activateLED('LED519')" class="col skateLED"></div>
+        <div id="LED520" onclick="activateLED('LED520')" class="col skateLED"></div>
+        <div id="LED521" onclick="activateLED('LED521')" class="col skateLED"></div>
+        <div id="LED522" onclick="activateLED('LED522')" class="col skateLED"></div>
+        <div id="LED523" onclick="activateLED('LED523')" class="col skateLED"></div>
+        <div id="LED524" onclick="activateLED('LED524')" class="col skateLED"></div>
+        <div id="LED525" onclick="activateLED('LED525')" class="col skateLED"></div>
+        <div id="LED526" onclick="activateLED('LED526')" class="col skateLED"></div>
+        <div id="LED527" onclick="activateLED('LED527')" class="col skateLED"></div>
+        <div id="LED528" onclick="activateLED('LED528')" class="col skateLED"></div>
+        <div id="LED529" onclick="activateLED('LED529')" class="col skateLED"></div>
+        <div id="LED530" onclick="activateLED('LED530')" class="col skateLED"></div>
+        <div id="LED531" onclick="activateLED('LED531')" class="col skateLED"></div>
+        <div id="LED532" onclick="activateLED('LED532')" class="col skateLED"></div>
+        <div id="LED533" onclick="activateLED('LED533')" class="col skateLED"></div>
+        <div id="LED534" onclick="activateLED('LED534')" class="col skateLED"></div>
+        <div id="LED535" onclick="activateLED('LED535')" class="col skateLED"></div>
+        <div id="LED536" onclick="activateLED('LED536')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED537" onclick="activateLED('LED537')" class="col skateLED"></div>
+        <div id="LED538" onclick="activateLED('LED538')" class="col skateLED"></div>
+        <div id="LED539" onclick="activateLED('LED539')" class="col skateLED"></div>
+        <div id="LED540" onclick="activateLED('LED540')" class="col skateLED"></div>
+        <div id="LED541" onclick="activateLED('LED541')" class="col skateLED"></div>
+        <div id="LED542" onclick="activateLED('LED542')" class="col skateLED"></div>
+        <div id="LED543" onclick="activateLED('LED543')" class="col skateLED"></div>
+        <div id="LED544" onclick="activateLED('LED544')" class="col skateLED"></div>
+        <div id="LED545" onclick="activateLED('LED545')" class="col skateLED"></div>
+        <div id="LED546" onclick="activateLED('LED546')" class="col skateLED"></div>
+        <div id="LED547" onclick="activateLED('LED547')" class="col skateLED"></div>
+        <div id="LED548" onclick="activateLED('LED548')" class="col skateLED"></div>
+        <div id="LED549" onclick="activateLED('LED549')" class="col skateLED"></div>
+        <div id="LED550" onclick="activateLED('LED550')" class="col skateLED"></div>
+        <div id="LED551" onclick="activateLED('LED551')" class="col skateLED"></div>
+        <div id="LED552" onclick="activateLED('LED552')" class="col skateLED"></div>
+        <div id="LED553" onclick="activateLED('LED553')" class="col skateLED"></div>
+        <div id="LED554" onclick="activateLED('LED554')" class="col skateLED"></div>
+        <div id="LED555" onclick="activateLED('LED555')" class="col skateLED"></div>
+        <div id="LED556" onclick="activateLED('LED556')" class="col skateLED"></div>
+        <div id="LED557" onclick="activateLED('LED557')" class="col skateLED"></div>
+        <div id="LED558" onclick="activateLED('LED558')" class="col skateLED"></div>
+        <div id="LED559" onclick="activateLED('LED559')" class="col skateLED"></div>
+        <div id="LED560" onclick="activateLED('LED560')" class="col skateLED"></div>
+        <div id="LED561" onclick="activateLED('LED561')" class="col skateLED"></div>
+        <div id="LED562" onclick="activateLED('LED562')" class="col skateLED"></div>
+        <div id="LED563" onclick="activateLED('LED563')" class="col skateLED"></div>
+        <div id="LED564" onclick="activateLED('LED564')" class="col skateLED"></div>
+        <div id="LED565" onclick="activateLED('LED565')" class="col skateLED"></div>
+        <div id="LED566" onclick="activateLED('LED566')" class="col skateLED"></div>
+        <div id="LED567" onclick="activateLED('LED567')" class="col skateLED"></div>
+        <div id="LED568" onclick="activateLED('LED568')" class="col skateLED"></div>
+        <div id="LED569" onclick="activateLED('LED569')" class="col skateLED"></div>
+        <div id="LED570" onclick="activateLED('LED570')" class="col skateLED"></div>
+        <div id="LED571" onclick="activateLED('LED571')" class="col skateLED"></div>
+        <div id="LED572" onclick="activateLED('LED572')" class="col skateLED"></div>
+        <div id="LED573" onclick="activateLED('LED573')" class="col skateLED"></div>
+        <div id="LED574" onclick="activateLED('LED574')" class="col skateLED"></div>
+        <div id="LED575" onclick="activateLED('LED575')" class="col skateLED"></div>
+        <div id="LED576" onclick="activateLED('LED576')" class="col skateLED"></div>
+        <div id="LED577" onclick="activateLED('LED577')" class="col skateLED"></div>
+        <div id="LED578" onclick="activateLED('LED578')" class="col skateLED"></div>
+        <div id="LED579" onclick="activateLED('LED579')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED580" onclick="activateLED('LED580')" class="col skateLED"></div>
+        <div id="LED581" onclick="activateLED('LED581')" class="col skateLED"></div>
+        <div id="LED582" onclick="activateLED('LED582')" class="col skateLED"></div>
+        <div id="LED583" onclick="activateLED('LED583')" class="col skateLED"></div>
+        <div id="LED584" onclick="activateLED('LED584')" class="col skateLED"></div>
+        <div id="LED585" onclick="activateLED('LED585')" class="col skateLED"></div>
+        <div id="LED586" onclick="activateLED('LED586')" class="col skateLED"></div>
+        <div id="LED587" onclick="activateLED('LED587')" class="col skateLED"></div>
+        <div id="LED588" onclick="activateLED('LED588')" class="col skateLED"></div>
+        <div id="LED589" onclick="activateLED('LED589')" class="col skateLED"></div>
+        <div id="LED590" onclick="activateLED('LED590')" class="col skateLED"></div>
+        <div id="LED591" onclick="activateLED('LED591')" class="col skateLED"></div>
+        <div id="LED592" onclick="activateLED('LED592')" class="col skateLED"></div>
+        <div id="LED593" onclick="activateLED('LED593')" class="col skateLED"></div>
+        <div id="LED594" onclick="activateLED('LED594')" class="col skateLED"></div>
+        <div id="LED595" onclick="activateLED('LED595')" class="col skateLED"></div>
+        <div id="LED596" onclick="activateLED('LED596')" class="col skateLED"></div>
+        <div id="LED597" onclick="activateLED('LED597')" class="col skateLED"></div>
+        <div id="LED598" onclick="activateLED('LED598')" class="col skateLED"></div>
+        <div id="LED599" onclick="activateLED('LED599')" class="col skateLED"></div>
+        <div id="LED600" onclick="activateLED('LED600')" class="col skateLED"></div>
+        <div id="LED601" onclick="activateLED('LED601')" class="col skateLED"></div>
+        <div id="LED602" onclick="activateLED('LED602')" class="col skateLED"></div>
+        <div id="LED603" onclick="activateLED('LED603')" class="col skateLED"></div>
+        <div id="LED604" onclick="activateLED('LED604')" class="col skateLED"></div>
+        <div id="LED605" onclick="activateLED('LED605')" class="col skateLED"></div>
+        <div id="LED606" onclick="activateLED('LED606')" class="col skateLED"></div>
+        <div id="LED607" onclick="activateLED('LED607')" class="col skateLED"></div>
+        <div id="LED608" onclick="activateLED('LED608')" class="col skateLED"></div>
+        <div id="LED609" onclick="activateLED('LED609')" class="col skateLED"></div>
+        <div id="LED610" onclick="activateLED('LED610')" class="col skateLED"></div>
+        <div id="LED611" onclick="activateLED('LED611')" class="col skateLED"></div>
+        <div id="LED612" onclick="activateLED('LED612')" class="col skateLED"></div>
+        <div id="LED613" onclick="activateLED('LED613')" class="col skateLED"></div>
+        <div id="LED614" onclick="activateLED('LED614')" class="col skateLED"></div>
+        <div id="LED615" onclick="activateLED('LED615')" class="col skateLED"></div>
+        <div id="LED616" onclick="activateLED('LED616')" class="col skateLED"></div>
+        <div id="LED617" onclick="activateLED('LED617')" class="col skateLED"></div>
+        <div id="LED618" onclick="activateLED('LED618')" class="col skateLED"></div>
+        <div id="LED619" onclick="activateLED('LED619')" class="col skateLED"></div>
+        <div id="LED620" onclick="activateLED('LED620')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+    <div class="row">
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div id="LED621" onclick="activateLED('LED621')" class="col skateLED"></div>
+        <div id="LED622" onclick="activateLED('LED622')" class="col skateLED"></div>
+        <div id="LED623" onclick="activateLED('LED623')" class="col skateLED"></div>
+        <div id="LED624" onclick="activateLED('LED624')" class="col skateLED"></div>
+        <div id="LED625" onclick="activateLED('LED625')" class="col skateLED"></div>
+        <div id="LED626" onclick="activateLED('LED626')" class="col skateLED"></div>
+        <div id="LED627" onclick="activateLED('LED627')" class="col skateLED"></div>
+        <div id="LED628" onclick="activateLED('LED628')" class="col skateLED"></div>
+        <div id="LED629" onclick="activateLED('LED629')" class="col skateLED"></div>
+        <div id="LED630" onclick="activateLED('LED630')" class="col skateLED"></div>
+        <div id="LED631" onclick="activateLED('LED631')" class="col skateLED"></div>
+        <div id="LED632" onclick="activateLED('LED632')" class="col skateLED"></div>
+        <div id="LED633" onclick="activateLED('LED633')" class="col skateLED"></div>
+        <div id="LED634" onclick="activateLED('LED634')" class="col skateLED"></div>
+        <div id="LED635" onclick="activateLED('LED635')" class="col skateLED"></div>
+        <div id="LED636" onclick="activateLED('LED636')" class="col skateLED"></div>
+        <div id="LED637" onclick="activateLED('LED637')" class="col skateLED"></div>
+        <div id="LED638" onclick="activateLED('LED638')" class="col skateLED"></div>
+        <div id="LED639" onclick="activateLED('LED639')" class="col skateLED"></div>
+        <div id="LED640" onclick="activateLED('LED640')" class="col skateLED"></div>
+        <div id="LED641" onclick="activateLED('LED641')" class="col skateLED"></div>
+        <div id="LED642" onclick="activateLED('LED642')" class="col skateLED"></div>
+        <div id="LED643" onclick="activateLED('LED643')" class="col skateLED"></div>
+        <div id="LED644" onclick="activateLED('LED644')" class="col skateLED"></div>
+        <div id="LED645" onclick="activateLED('LED645')" class="col skateLED"></div>
+        <div id="LED646" onclick="activateLED('LED646')" class="col skateLED"></div>
+        <div id="LED647" onclick="activateLED('LED647')" class="col skateLED"></div>
+        <div id="LED648" onclick="activateLED('LED648')" class="col skateLED"></div>
+        <div id="LED649" onclick="activateLED('LED649')" class="col skateLED"></div>
+        <div id="LED650" onclick="activateLED('LED650')" class="col skateLED"></div>
+        <div id="LED651" onclick="activateLED('LED651')" class="col skateLED"></div>
+        <div id="LED652" onclick="activateLED('LED652')" class="col skateLED"></div>
+        <div id="LED653" onclick="activateLED('LED653')" class="col skateLED"></div>
+        <div id="LED654" onclick="activateLED('LED654')" class="col skateLED"></div>
+        <div id="LED655" onclick="activateLED('LED655')" class="col skateLED"></div>
+        <div id="LED656" onclick="activateLED('LED656')" class="col skateLED"></div>
+        <div id="LED657" onclick="activateLED('LED657')" class="col skateLED"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+        <div class="col skateLED LEDMissing"></div>
+    </div>
+</div>
+</body>
+</html>
